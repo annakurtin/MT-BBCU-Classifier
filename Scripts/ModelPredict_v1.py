@@ -27,10 +27,8 @@ if year:
 
 collab = st.radio("Select Collaborator: ", ('UMBEL', 'FWP'))
 if (collab == 'UMBEL'):
-    st.success("Collaborator set to UMBEL")
     region = " "
 elif (collab == 'FWP'):
-    st.success("Collaborator set to FWP")
     region = st.text_input("Please enter the region (ex 6):")
     if region:
         if not (region.isnumeric()):
@@ -100,9 +98,11 @@ model.preprocessor.pipeline.to_spec.set(window_samples=512, overlap_samples=256)
 model.preprocessor.pipeline.frequency_mask.bypass = True
 st.write("Loaded model and configured preprocessing of spectrogram")
 
-
-scores = model.predict(audio_files)
-scores.to_csv(output_file_path)
+if(st.button("Click Here to Run BBCU Model 2.0 On Selected Data")):
+    with st.spinner("Running classifier...", show_time=True):
+        scores = model.predict(audio_files)
+    st.success("Classifier run complete!")
+    scores.to_csv(output_file_path)
 
 # Old code
 _ = '''
