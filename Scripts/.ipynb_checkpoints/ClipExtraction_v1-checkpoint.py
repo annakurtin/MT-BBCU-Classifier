@@ -176,6 +176,7 @@ if scores_file and metadata_file:
     '''
     # default this to the first date in the date column
     # add a leading zero onto this if there is only one digit
+    # Change to date select
     first_monthnum = st.number_input("Please select the month of the earliest date you want included", 1,12)
     first_monthnum_str = f"{first_monthnum:02d}"
     first_daynum = st.number_input("Please select the day of the earliest date you want included",1,31)
@@ -183,9 +184,20 @@ if scores_file and metadata_file:
     first_date = pd.to_datetime(f"{year}{first_monthnum_str}{first_daynum_str}", format='%Y%m%d', errors='coerce').date()
     last_monthnum = st.number_input("Please select the month of the latest date you want included", 1,12)
     last_monthnum_str = f"{last_monthnum:02d}"
+    last_monthnum_int = int(last_monthnum_str)
     last_daynum = st.number_input("Please select the day of the latest date you want included",1,31)
+    # ADD ONE TO THIS
     last_daynum_str = f"{last_daynum:02d}"
-    last_date = pd.to_datetime(f"{year}{last_monthnum_str}{last_daynum_str}", format='%Y%m%d', errors='coerce').date()
+    last_daynum_int = int(last_daynum_str)
+    last_daynum_int = last_daynum_int+1
+    if last_daynum_int == 32:
+        last_daynum_into = 1
+        last_monthnum_int = int(last_monthnum_str)
+        last_monthnum_int = last_monthnum_int +1
+        if last_monthnum_int == 13:
+            last_monthnum_int = 1
+    last_date = pd.to_datetime(f"{year}{last_monthnum_str}{last_daynum_int}", format='%Y%m%d', errors='coerce').date()
+    st.write(last_date)
     # Exclude data that is outside the specified date ranges
     scores = scores.loc[(scores['date'] >= first_date) & (scores['date'] <= last_date)]
     #st.write(scores['date'].dtype)
@@ -237,34 +249,26 @@ if scores_file and metadata_file:
         
     # create a function to read in the length of the user specified intervals
     def date_range(start, end, maxdays, interval):
+        # find the number of survey periods based on the user specified interval
         num_periods = maxdays / interval
+        # truncate this  so that it is an integer and doesn't exceed the total days of the monitoring period
         periods_int = math.trunc(num_periods)
         survey_intervals = []
         for i in range(periods_int+1):
-            result = (start + interval * i)
+            add = interval * i # this is already in timedelta format?
+            #add = pd.to_datetime(add, format='%d').date()
+            # convert this to days 
+            result = (start + add)
+            #result = pd.to_datetime(result, format='%Y%m%d', errors='coerce').date()
             survey_intervals.append(result)
         yield survey_intervals
             
-        # Calculate those cut off yield end
+        # Calculate if any days have been cut off due to survey interval
         dates_excluded = end - (start + interval * (periods_int) )
         excluded = dates_excluded.days
         # Give input on better survey interval times if data is excluded
         if excluded > 1:
             info_excluded_days(maxdays, excluded)
-            _='''
-            #excluded = dates_excluded.strftime('%Y%m%d')
-            st.info(f"Excluded {excluded} days at the end of the {maxdays.days}-day monitoring period, consider a different interval")
-            periods_options = find_factors(maxdays.days)
-            # for each element in periods_options, divide maxdays.days by it to get the time period
-            interval_options = []
-            for i in periods_options:
-                out = int(maxdays.days/i)
-                interval_options.append(out)
-            # Exclude the last one because this is just the total number of days
-            interval_options = interval_options[1:]
-            st.info(f"Monitoring period you selected is divisible in even sections: {periods_options} ")
-            st.info(f"Options for survey intervals that would be evenly distributed across the monitoring period:{interval_options} days")
-            '''
 
     
 
