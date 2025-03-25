@@ -22,9 +22,11 @@ from datetime import date
 from datetime import timedelta
 import streamlit as st
 import math
+import re
 
 # Make functions
 #Function to find all the factors for a given number
+# Inputs chosen which is the number to find the factors of
 def find_factors(chosen, currentnum=None, numbers=None): 
     # Recursion start, always append 1 and start with 2
     if numbers is None:
@@ -40,11 +42,15 @@ def find_factors(chosen, currentnum=None, numbers=None):
             numbers.append(currentnum)
         # Always continue with the next number:
         currentnum += 1
+        # Recursion to run the function on itself again 
         return find_factors(chosen, currentnum, numbers)
         
+# Function to give information about the number of days excluded from the clips and suggest better intervals
+# Inputs maxdays created from subtracting the earlist user specified day from the latest user specified day (deltatime class) and excluded which is the number of days left over (deltatime class)
 def info_excluded_days(maxdays, excluded):
     #excluded = dates_excluded.strftime('%Y%m%d')
         st.info(f"Excluded {excluded} days at the end of the {maxdays.days}-day monitoring period, consider a different interval")
+        # Call find_factors function
         periods_options = find_factors(maxdays.days)
         # for each element in periods_options, divide maxdays.days by it to get the time period
         interval_options = []
@@ -56,7 +62,8 @@ def info_excluded_days(maxdays, excluded):
         #st.info(f"Monitoring period you selected is divisible in even sections: {periods_options} ")
         st.info(f"Options for survey intervals that would be evenly distributed across the monitoring period:{interval_options} days")
     
-# create a function to read in the length of the user specified intervals
+# create a function to read in the length of the user specified intervals and provide the start date for each interval
+# Inputs start (date time user specified), end (date time user specified), maxdays (calculated from start and end, deltatime) and interval (number of days desired in one survey period, provided by the user)
 def date_range(start, end, maxdays, interval):
     # find the number of survey periods based on the user specified interval
     num_periods = maxdays / interval
@@ -75,8 +82,7 @@ def date_range(start, end, maxdays, interval):
         info_excluded_days(maxdays, excluded)
     # Return a list of the start dates of each survey interval 
     return survey_intervals
-# Suppress userwarnings about metadata
-#Warning.filterwarnings("ignore", category=UserWarning)
+    
 
 '''
 Setup and file uploads 
@@ -105,7 +111,7 @@ first_date = st.date_input("Please select the earliest date you would like inclu
 last_date = st.date_input("Please select the latest date you would like included within the monitoring period",value = default_end)
 last_date = last_date + timedelta(1)
 #st.write("one plus last date",last_date)
-st.write(type(last_date))
+#st.write(type(last_date))
 max_days = last_date - first_date
 max_days_int = max_days.days
 
@@ -133,24 +139,34 @@ if scores_file and metadata_file:
     locs_list = sorted(set(metadata['point_id'].tolist()))
 
     # Format the scores file
+    # first isolate out the file ID ****************************************
+    # SEPARATE OUT THIS FILE ID THEN ISOLATE POINT ID, DATE, AND TIME FROM IT
+    scores['file_id'] = scores['file'].str.extract(r'([A-Z0-9\-]+_\d{8}_\d{6})')
+    # Make a column for point ID from the scores file
+    scores['point_id'] = scores['file_id'].str.split('_').str[0]
+    st.write(scores)
+_='''
     # Make a column for point ID from the scores file
     scores['point_id'] = scores['file'].apply(lambda x: os.path.basename(x).split('_')[0] if isinstance(x, str) else None)
     # Get a list of unique point_ids in the scores file
     point_list = list(set(scores['point_id']))
     st.write(f"list of points from scores file: {point_list}")
     # Make date column
-    scores['date'] = scores['file'].apply(lambda x: os.path.basename(x).split('_')[1] if isinstance(x, str) else None)
+    scores['date'] = scores['file'].apply(lambda x: re.search(r'_(\d{8})_\d{6}_', os.path.basename(x)).group(1))
+    st.write(scores)
+    #scores['date'] = scores['file'].apply(lambda x: os.path.basename(x).split('_')[1] if isinstance(x, str) else None)
     #scores['date'] = pd.to_numeric(scores['date']) 
     scores['date'] = pd.to_datetime(scores['date'], format='%Y%m%d').dt.date
     # Exclude data that is outside the specified date ranges
     scores = scores.loc[(scores['date'] >= first_date) & (scores['date'] < last_date)]
     # Make time column
     scores['time'] = scores['file'].apply(lambda x: os.path.basename(x).split('_')[2])
+    #**********************************************************************************
     # Make species column
     scores['species'] = 'BBCU'
     # Make a column for time interval
     scores['survey_interval'] = np.nan
-    # Calculate the number of intervals and the start date
+    # Generate a list of the start dates of each interval 
     survey_starts = date_range(first_date, last_date, max_days, interval)
     #st.write(f"survey start dates:{survey_starts}")
     #st.write(type(survey_starts))
@@ -159,6 +175,7 @@ if scores_file and metadata_file:
         for row in range(len(scores['date'])):
             # check if the value of date for this row is greater than or equal to the start date and less than the next start date
             if (scores.at[row,'date'] >= survey_starts[i]):
+                # This throws a key error if the start date of monitoring period earlier than any scores file
                 # assign the survey interval
                 scores.at[row, 'survey_interval'] = i + 1
     # Order the columns
@@ -177,14 +194,15 @@ if scores_file and metadata_file:
     st.write(scores)
     
     
-    
+
     # set run_complete equal to true as if the whole thing had been run
-    run_complete = True
+    #run_complete = True
     
     # make a temporary directory for the folders to go into
     big_folder = os.path.join(os.getcwd(), f"{year}_{collab}{region}_clips")  # add on the time period to this?
     # Initialize an empty dataframe for this dataset
     dataset_df = pd.DataFrame()
+    st.write(big_folder)
 
     # Iterate through each point in the point_list
     for point in point_list:
@@ -227,7 +245,8 @@ if scores_file and metadata_file:
                 # TO DO: 
                 ## FIGURE OUT HOW TO CHAIN GROUP BY AND SORT VALUES TO GET THE TOP SPECIFIED FROM EACH SITE
                 ## make a new test dataset that has various survey intervals and point ids 
-                _='''
+'''              
+_='''
                 # Find the index of the top scoring file from each day and each time period for that class
                 idx = sub_df.groupby(['date', 'survey_interval'])[cl].idxmax() # go back to Tessa's original code to see how to pull out the top number specified
                 
