@@ -93,7 +93,11 @@ year = '2022' # Format YYYY
 collab = 'UMBEL' # Format UMBEL or FWPR#
 region = ""
 metadata_file = st.file_uploader("Upload a .csv of the metadata for the acoustic data that contains a 'point_id' column", type=['csv'])
-classes = ['cadence_coo','rattle']
+cl = 'cadence_coo'
+# I think I"m just going to use the cadence_coo class since this code is easier to implement and the rattle class doesn't perform well (will be more fale positives for user to dig through)
+#classes = ['cadence_coo','rattle']
+#classes = st.multiselect("Which call types would you like to extract from the scores file",["cadence_coo", "rattle"])
+# Do I want to leave this as user specified or not?***********************
 # Establish which dataset you're working with 
 dataset = f'{year}_{collab}'
 print(dataset)
@@ -109,6 +113,7 @@ default_start = f"{year}-06-01"
 default_end = f"{year}-08-15"
 first_date = st.date_input("Please select the earliest date you would like included within the monitoring period",value = default_start)
 last_date = st.date_input("Please select the latest date you would like included within the monitoring period",value = default_end)
+# Add one to the last date so that you include the last user specified date
 last_date = last_date + timedelta(1)
 #st.write("one plus last date",last_date)
 #st.write(type(last_date))
@@ -122,7 +127,13 @@ interval_int = st.number_input("Please select the number of days you would like 
 interval = timedelta(days=interval_int)
 # Puts out a list containing all of the start dates of the sub survey intervals within the monitoring period 
 #st.write(interval)
-
+'''
+Please specify how many clips you would like to vet from each survey interval
+'''
+# 360 clips in a 30 minute file 
+max_clips = 360 * max_days_int
+st.write(max_clips)
+num_clips = st.number_input("Please select the number of clips to extract from each survey interval",1,max_clips)
 
 '''
 Scores file processing and clip extraction
@@ -139,42 +150,36 @@ if scores_file and metadata_file:
     locs_list = sorted(set(metadata['point_id'].tolist()))
 
     # Format the scores file
-    # first isolate out the file ID ****************************************
-    # SEPARATE OUT THIS FILE ID THEN ISOLATE POINT ID, DATE, AND TIME FROM IT
+    # Create a file_id column with just the names of the audio files
     scores['file_id'] = scores['file'].str.extract(r'([A-Z0-9\-]+_\d{8}_\d{6})')
     # Make a column for point ID from the scores file
     scores['point_id'] = scores['file_id'].str.split('_').str[0]
-    st.write(scores)
-_='''
-    # Make a column for point ID from the scores file
-    scores['point_id'] = scores['file'].apply(lambda x: os.path.basename(x).split('_')[0] if isinstance(x, str) else None)
     # Get a list of unique point_ids in the scores file
     point_list = list(set(scores['point_id']))
     st.write(f"list of points from scores file: {point_list}")
-    # Make date column
-    scores['date'] = scores['file'].apply(lambda x: re.search(r'_(\d{8})_\d{6}_', os.path.basename(x)).group(1))
-    st.write(scores)
-    #scores['date'] = scores['file'].apply(lambda x: os.path.basename(x).split('_')[1] if isinstance(x, str) else None)
-    #scores['date'] = pd.to_numeric(scores['date']) 
+    # Make a date column and format as datetime
+    scores['date'] = scores['file_id'].str.split('_').str[1]
     scores['date'] = pd.to_datetime(scores['date'], format='%Y%m%d').dt.date
     # Exclude data that is outside the specified date ranges
     scores = scores.loc[(scores['date'] >= first_date) & (scores['date'] < last_date)]
+    # Reset the index because we dropped some rows 
+    scores = scores.reset_index(drop=True)
     # Make time column
-    scores['time'] = scores['file'].apply(lambda x: os.path.basename(x).split('_')[2])
-    #**********************************************************************************
-    # Make species column
+    scores['time'] = scores['file_id'].str.split('_').str[2]
+    # Make species column (will all be the same, this is legacy code from the source which handled multiple species)
     scores['species'] = 'BBCU'
     # Make a column for time interval
     scores['survey_interval'] = np.nan
-    # Generate a list of the start dates of each interval 
+    # Generate a list of the start dates of each interval using custom function
     survey_starts = date_range(first_date, last_date, max_days, interval)
     #st.write(f"survey start dates:{survey_starts}")
-    #st.write(type(survey_starts))
+    # Assign survey intervals to scores
     for i in range(len(survey_starts)):
-        st.write(f"iteration {i}")
-        for row in range(len(scores['date'])):
+        for row in range(len(scores)):
+            # Access the date value for this row
+            row_date = scores.at[row, 'date']
             # check if the value of date for this row is greater than or equal to the start date and less than the next start date
-            if (scores.at[row,'date'] >= survey_starts[i]):
+            if (row_date >= survey_starts[i]):
                 # This throws a key error if the start date of monitoring period earlier than any scores file
                 # assign the survey interval
                 scores.at[row, 'survey_interval'] = i + 1
@@ -191,61 +196,86 @@ _='''
              'rattle']]
     # make a clean index column
     scores = scores.reset_index(drop=True)
-    st.write(scores)
+    #st.write(scores)
+    #st.write(point_list[-1])
     
     
-
-    # set run_complete equal to true as if the whole thing had been run
-    #run_complete = True
     
     # make a temporary directory for the folders to go into
-    big_folder = os.path.join(os.getcwd(), f"{year}_{collab}{region}_clips")  # add on the time period to this?
+    #big_folder = os.path.join(os.getcwd(), f"{year}_{collab}{region}_clips")  # add on the time period to this?
     # Initialize an empty dataframe for this dataset
     dataset_df = pd.DataFrame()
-    st.write(big_folder)
+    #st.write(big_folder)
+    with st.spinner("Running clip extraction...", show_time=True):
+        #last_run = False
+        # Iterate through each point in the point_list
+        for point in point_list:
+            #if point == point_list[-1]:
+            #    last_run = True
+            # Initialize an emtpy dataframe for this point
+            keep_df = pd.DataFrame()
+            # Initialize a folder relating the class to the location you're looking at
+            #folder = os.path.join(big_folder, point) #'_topclip_perperiod/' + point
+            print("The current point is", point)
+            # Check if the location from the file is included in the list of locations of the acoustic data, and if not, nothing happens
+            if point not in locs_list:
+                # place for future code if the location is not in the list
+                #Warning.warn('point ID from scores file not in list from acoustic metadata', UserWarning)
+                st.warning('Point not in metadata')
+                st.info(f"Point {point} is not in metadata file provided. Please check to ensure this is correct.")
+            else:
+                # Check if the folder already exists, and if not, create the folder
+                #if not os.path.exists(folder):
+                #    os.makedirs(folder)
+                #    st.success("Subfolder created")
+                    # Not sure that this is doing exactly what I want as far as creating a folder - might have to modify this for hugging face but we'll go with it for now
+                # Copy over the scores file: Use .copy() to ensure df is a standalone copy and not ust a view of the original dataframe
+                df = scores.copy() 
+                # Pull out just the values that reflect the current point
+                df = df[df['point_id'] == point]
+    
+                # pull out number of survey intervals 
+                survey_intervals = list(set(df['survey_interval']))
+                #st.write(survey_intervals)
+                
+                # Iterate through each survey interval
+                # Might need to put a test case here to catch if any monitors cut out early 
+                for interval in survey_intervals:
+                    # Initialize a counter
+                    #num = 0
+                    # make a sub data frame to work with
+                    sub_df = df.copy()
+                    # Split out the survey interval of interest and sort values by the score of the specified class
+                    sub_df = sub_df[sub_df['survey_interval'] == interval].sort_values(by=[cl],ascending=False)
+                    
+                    # Take the top scoring files based on user specified input
+                    sub_df = sub_df.head(num_clips)
+                    sub_df = sub_df.reset_index(drop=True)
+                    #st.write(f"sorted sub dataset of point {point} and interval {interval}")
+                    #st.write(sub_df)
+                    
+                    # Add on 
+                    #num += len(sub_df)
+                    # decide whether to keep in new data
+                    if len(sub_df) < 1:
+                        st.write(f'{point} interval {interval} does not have a full day of top scoring files for this class ({cl}).')
+                    else:
+                        # append the result to dataframe with top scoring clips
+                        keep_df = pd.concat([keep_df,sub_df])
+            
+            if len(keep_df) < 1:
+                st.write(f"{point} does not have sufficient data, clip extraction failed.")
+                continue
+            dataset_df = pd.concat([dataset_df,keep_df])
+            dataset_df = dataset_df.reset_index(drop=True)
+        st.write(dataset_df)
+        #if last_run == True:
+        #    st.success("Clip Extraction Completed!")
+        # set run_complete equal to true as if the whole thing had been run
+        #run_complete = True
 
-    # Iterate through each point in the point_list
-    for point in point_list:
-        # Initialize an emtpy dataframe for this point
-        keep_df = pd.DataFrame()
-        # Initialize a folder relating the class to the location you're looking at
-        folder = os.path.join(big_folder, point) #'_topclip_perperiod/' + point
-        print("The current point is", point)
-        # Check if the location from the file is included in the list of locations of the acoustic data, and if not, nothing happens
-        if point not in locs_list:
-            # place for future code if the location is not in the list
-            #Warning.warn('point ID from scores file not in list from acoustic metadata', UserWarning)
-            st.warning('Point not in metadata')
-            st.info(f"Point {point} is not in metadata file provided. Please check to ensure this is correct.")
-        else:
-            # Check if the folder already exists, and if not, create the folder
-            if not os.path.exists(folder):
-                os.makedirs(folder)
-                st.success("Subfolder created")
-                # Not sure that this is doing exactly what I want as far as creating a folder - might have to modify this for hugging face but we'll go with it for now
-            # Copy over the scores file: Use .copy() to ensure df is a standalone copy and not ust a view of the original dataframe
-            df = scores.copy() 
-            # Pull out just the values that reflect the current point
-            df = df[df['point_id'] == point]
-
-            # Iterate through each class in the CNN model
-            for cl in classes:
-                # Initialize a counter
-                num = 0
-        
-                # make a sub data frame to work with
-                sub_df = df.copy()
-                idx = sub_df.groupby(['date', 'survey_interval'])[cl].sort_values(by=[cl],ascending=False)
-                # resets the index at the start of the for loop but drops the current value from consideration (double check this)
-                sub_df = sub_df.reset_index(drop=True)
-                # take the top 10 from each site
-                sub_df = sub_df.iloc[:10]
-                st.write(sub_df)
-                 # LEFT OFF HERE ***********************
-                # TO DO: 
-                ## FIGURE OUT HOW TO CHAIN GROUP BY AND SORT VALUES TO GET THE TOP SPECIFIED FROM EACH SITE
-                ## make a new test dataset that has various survey intervals and point ids 
-'''              
+    # add in a download button 
+         
 _='''
                 # Find the index of the top scoring file from each day and each time period for that class
                 idx = sub_df.groupby(['date', 'survey_interval'])[cl].idxmax() # go back to Tessa's original code to see how to pull out the top number specified
